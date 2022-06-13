@@ -68,31 +68,7 @@ To complete this lab, you must verify that your account has sufficient permissio
    - Total Regional Spot vCPUs: **960**
    - Total Regional vCPUs: **830**
 
-1. If the number of vCPUs isn't sufficient, on the subscription's **Usage + quotas** blade, select **Request Increase**.
-1. On the **Basic** tab of the **New support request** blade, specify the following, and then select **Next: Solutions >**:
-
-   - Summary: **Insufficient compute quotas**
-   - Issue type: **Service and subscription limits (quotas)**
-   - Subscription: Enter the name of the Azure subscription you will be using in this lab.
-   - Quota type: **Compute-VM (cores-vCPUs) subscription limit increases**
-   - Support plan: Enter the name of the support plan associated with the target subscription.
-
-1. On the **Details** tab of the **New support request** blade, select the **Enter details** link.
-1. On the **Quota details** tab of the **New support request** blade, specify the following settings, and then select **Save and continue**:
-
-   - Deployment model: **Resource Manager**
-   - Location: Enter the name of the target Azure region you intend to use in this lab.
-   - Quotas: Enter the VM series and the new vCPU limit.
-
-1. On the **Details** tab of the **New support request** blade, specify the following settings, and then select **Next: Review + create >**:
-
-   - Advanced diagnostic information: **Yes**
-   - Severity: **C - Minimal impact**
-   - Preferred contact method: Choose your preferred option and provide your contact details.
-
-1. On the **Review + create** tab of the **New support request** blade, select **Create**.
-
-   > Note: Typically, requests for quota increases are completed within a few hours, but its possible that the processing might take up to a few days.
+1. If the number of vCPUs isn't sufficient, on the subscription's, Please report it to the instructor and request for a new environment.
 
 ## Exercise 1: Prepare for implementing the Azure HPC OnDemand Platform environment
 
