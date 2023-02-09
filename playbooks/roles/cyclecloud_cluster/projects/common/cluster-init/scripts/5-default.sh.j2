@@ -7,20 +7,17 @@
 chmod 700 -R /mnt/cluster-init
 
 # change access to resource so that temp jobs can be written there
-# FIXME : /mnt/resource doesn't exists on Ubuntu
+# on Ubuntu and AlmaLinux resource disk is mounted in /mnt
+[ -d /mnt/resource ] || mkdir /mnt/resource
 chmod 777 /mnt/resource
 
-# Grant sudo for users with sudo privilege
-{% for user in users %}
-{% if user.sudo is defined and user.sudo %}
-echo "{{user.name}} ALL=(ALL) NOPASSWD: ALL" | tee -a /etc/sudoers.d/{{ user.name | map('regex_replace', '[^0-9a-zA-Z-]', '')|list|join() }}
-{% endif %}
-{% endfor %}
+# Grant sudo for users in the az-hop-localadmins group
+echo "%az-hop-localadmins ALL=(ALL) NOPASSWD: ALL" | tee -a /etc/sudoers.d/az-hop-localadmins
 
 # For any NV instances, reinit the session
-AZHPC_VMSIZE=$(curl -s --noproxy "*" -H Metadata:true "http://169.254.169.254/metadata/instance/compute?api-version=2019-08-15" | jq -r '.vmSize' | tr '[:upper:]' '[:lower:]')
-case $AZHPC_VMSIZE in
-  standard_nv*)
+VM_SIZE=$(curl -s --noproxy "*" -H Metadata:true "http://169.254.169.254/metadata/instance/compute?api-version=2019-08-15" | jq -r '.vmSize' | tr '[:upper:]' '[:lower:]' | sed 's/standard_//')
+case $VM_SIZE in
+  nv*|nc*t4_v3)
     echo "Configure xorg.conf"
     nvidia-xconfig --enable-all-gpus --allow-empty-initial-configuration -c /etc/X11/xorg.conf --virtual=1920x1200 -s
     sed -i '/Section "Device"/a\    Option         "HardDPMS" "false"' /etc/X11/xorg.conf
@@ -33,3 +30,21 @@ esac
 if [ ! -d /usr/share/Modules ]; then
     ln -s /usr/share/modules /usr/share/Modules
 fi
+
+# Add modulefiles from HPC CentOS image to module path
+export MODULEPATH=$MODULEPATH:/usr/share/Modules/modulefiles/
+
+# Disable the antivirus
+if [ -a /usr/lib/systemd/system/azsecd.service ] ; then
+  systemctl stop azsecd
+  systemctl disable azsecd
+  echo "Disabled azsecd service"
+fi
+
+#This is to add domain users for enabling ssh among the VM's
+cat <<EOF >>/etc/ssh/sshd_config
+Match group "domain users"
+  AllowUsers *
+AllowUsers hpcadmin
+EOF
+systemctl restart sshd

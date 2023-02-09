@@ -19,6 +19,7 @@
   yum:
     state: latest
     security: yes
+    lock_timeout : 180
 
 - name: install AZ CLI repo
   shell: |
@@ -50,6 +51,8 @@
 - name: mount data disk
   shell: |
     set -e
+    # If cycle_server is already mounted, exit
+    if grep -q cycle_server /etc/fstab; then exit 0; fi
     parted /dev/disk/azure/scsi1/lun0 --script -- mklabel gpt
     parted -a optimal /dev/disk/azure/scsi1/lun0 mkpart primary 0% 100%
     # try a sleep here to wait for the symlink
@@ -58,25 +61,25 @@
     disk_uuid=$(blkid -o value -s UUID  /dev/disk/azure/scsi1/lun0-part1)
     mkdir /opt/cycle_server
     echo "UUID=$disk_uuid /opt/cycle_server xfs defaults,nofail 1 2" >> /etc/fstab
-    mount -a
-    touch /tmp/data_disk_mounted
-  args:
-    creates: /tmp/data_disk_mounted
+    mount /opt/cycle_server
 
 - name: Install pre-reqs packages
   yum:
     name: azure-cli, dnsmasq
     state: present
+    lock_timeout : 180
 
 - name: Install CycleCloud
   yum:
     name: "cyclecloud8-{{cc_version}}"
     state: present
+    lock_timeout : 180
 
 - name: Install Jetpack
   yum:
     name: "jetpack8-{{cc_version}}"
     state: present
+    lock_timeout : 180
 
 - name: Create a data record for azhop and start cycleserver
   shell: |
@@ -84,13 +87,13 @@
     # create a data record to identify this installation as an az-hop VM
     cat > /opt/cycle_server/config/data/azhop.txt <<EOF
     AdType = "Application.Setting"
-    Name = "site_id"
+    Name = "distribution_method"
     Value = "azhop"
     EOF
     /opt/cycle_server/cycle_server await_startup
-    /opt/cycle_server/cycle_server execute 'update Application.Setting set Value = undefined where Name == "site_id" || Name == "reported_version"'
+    #/opt/cycle_server/cycle_server execute 'update Application.Setting set Value = undefined where Name == "site_id" || Name == "reported_version"'
   args:
-    creates: /opt/cycle_server/config/data/azhop.txt.ok
+    creates: /opt/cycle_server/config/data/azhop.txt.imported
 
 - name: Extract and install the CLI
   shell: |
@@ -100,16 +103,16 @@
     CS_ROOT=/opt/cycle_server
     unzip $CS_ROOT/tools/cyclecloud-cli.zip
     pushd cyclecloud-cli-installer
-    ./install.sh --system
+    ./install.sh --system -y
     popd
     # Update properties
     sed -i 's/webServerMaxHeapSize\=2048M/webServerMaxHeapSize\=4096M/' $CS_ROOT/config/cycle_server.properties
     sed -i 's/webServerPort\=8080/webServerPort\=80/' $CS_ROOT/config/cycle_server.properties
     sed -i 's/webServerSslPort\=8443/webServerSslPort\=443/' $CS_ROOT/config/cycle_server.properties
     sed -i 's/webServerEnableHttps\=false/webServerEnableHttps=true/' $CS_ROOT/config/cycle_server.properties
-    touch /tmp/cli_installed
+    touch /opt/cycle_server/cli_installed
   args:
-    creates: /tmp/cli_installed
+    creates: /opt/cycle_server/cli_installed
 
 - name: stop cycle_server
   service:
@@ -125,7 +128,7 @@
   script: '{{role_path}}/files/configure.py --useManagedIdentity --username {{cc_admin_user}} --acceptTerms --publickey "{{cc_public_key}}" --password "{{cc_password}}" --storageAccount {{cc_storage}}'
 
 - name: Configure AD domain to connect to
-  script: '{{role_path}}/files/configure_ad.py --url "ldap://{{cc_ad_server}}" --domain "@{{cc_domain}}"'
+  script: '{{role_path}}/files/configure_ad.py --url "ldap://{{cc_ldap_server}}" --domain "@{{cc_domain}}"'
 
 - name: Add User Role Record 
   copy:
@@ -136,6 +139,12 @@
   copy:
     src: '{{role_path}}/files/brand.json'
     dest: /opt/cycle_server/config/data/brand.json
+
+- name: Fix CSS
+  copy:
+    src: '{{role_path}}/files/fabric.css'
+    dest: /opt/cycle_server/system/web/static/office-ui-fabric-react/css/fabric.css
+  when: cc_version == "8.2.2-1902"
 
 - name: Configure CycleCloud CLI
   command: '/usr/local/bin/cyclecloud initialize --force --batch --name ccportal --url=https://localhost:9443/cyclecloud --verify-ssl=false --username={{cc_admin_user}} --password="{{cc_password}}"'

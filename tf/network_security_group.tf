@@ -1,31 +1,40 @@
-resource "time_sleep" "wait_forsubnets" {
+# resource "time_sleep" "wait_forsubnets" {
+#   depends_on   = [azurerm_subnet.ad, 
+#                   azurerm_subnet.frontend, 
+#                   azurerm_subnet.admin, 
+#                   azurerm_subnet.netapp, 
+#                   azurerm_subnet.compute, 
+#                   azurerm_subnet.bastion, 
+#                   azurerm_subnet.gateway,
+#                   azurerm_subnet.outbounddns]
+#   create_duration = "20s"
+# }
+
+# Application security groups
+resource "azurerm_application_security_group" "asg" {
+  for_each = local.create_nsg ? local.asgs : local.empty_map
+  name                = each.value
+  resource_group_name = local.create_nsg ? (local.create_rg ? azurerm_resource_group.rg[0].name     : data.azurerm_resource_group.rg[0].name )     : local.asg_resource_group
+  location            = local.create_nsg ? (local.create_rg ? azurerm_resource_group.rg[0].location : data.azurerm_resource_group.rg[0].location ) : data.azurerm_resource_group.rg[0].location
+}
+
+data "azurerm_application_security_group" "asg" {
+  for_each = local.create_nsg ? local.empty_map : local.asgs
+  name                = each.value
+  resource_group_name = local.create_nsg ? azurerm_resource_group.rg[0].name : local.asg_resource_group
+}
+
+# Read subnets data so we can dynamically retrieve all CIDR for the NSG rules
+data "azurerm_subnet" "subnets" {
+#  depends_on   = [time_sleep.wait_forsubnets]
   depends_on   = [azurerm_subnet.ad, 
                   azurerm_subnet.frontend, 
                   azurerm_subnet.admin, 
                   azurerm_subnet.netapp, 
                   azurerm_subnet.compute, 
                   azurerm_subnet.bastion, 
-                  azurerm_subnet.gateway] 
-  create_duration = "20s"
-}
-
-# Application security groups
-resource "azurerm_application_security_group" "asg" {
-  for_each = local.create_nsg ? local.asgs : local.empty_map
-  name                = each.key
-  resource_group_name = local.create_rg ? azurerm_resource_group.rg[0].name : data.azurerm_resource_group.rg[0].name
-  location            = local.create_rg ? azurerm_resource_group.rg[0].location : data.azurerm_resource_group.rg[0].location
-}
-
-data "azurerm_application_security_group" "asg" {
-  for_each = local.create_nsg ? local.empty_map : local.asgs
-  name                = each.key
-  resource_group_name = local.create_rg ? azurerm_resource_group.rg[0].name : data.azurerm_resource_group.rg[0].name
-}
-
-# Read subnets data so we can dynamically retrieve all CIDR for the NSG rules
-data "azurerm_subnet" "subnets" {
-  depends_on   = [time_sleep.wait_forsubnets] 
+                  azurerm_subnet.gateway,
+                  azurerm_subnet.outbounddns]
   for_each = local.subnets
   name                 = try(local.configuration_yml["network"]["vnet"]["subnets"][each.key]["name"], each.value)
   resource_group_name  = local.create_vnet ? (local.create_rg ? azurerm_resource_group.rg[0].name : data.azurerm_resource_group.rg[0].name) : data.azurerm_virtual_network.azhop[0].resource_group_name
@@ -34,6 +43,7 @@ data "azurerm_subnet" "subnets" {
 
 # Network security group for all subnets, always create this resource so we can add dynamic content
 resource "azurerm_network_security_group" "common" {
+  count               = local.create_nsg ? 1 : 0
   name                = "nsg-common"
   resource_group_name = local.create_rg ? azurerm_resource_group.rg[0].name : data.azurerm_resource_group.rg[0].name
   location            = local.create_rg ? azurerm_resource_group.rg[0].location : data.azurerm_resource_group.rg[0].location
@@ -65,23 +75,29 @@ resource "azurerm_network_security_group" "common" {
 resource "azurerm_subnet_network_security_group_association" "frontend" {
   count                     = local.create_nsg ? 1 : 0
   subnet_id                 = local.create_admin_subnet ? azurerm_subnet.frontend[0].id : data.azurerm_subnet.frontend[0].id
-  network_security_group_id = azurerm_network_security_group.common.id
+  network_security_group_id = azurerm_network_security_group.common[0].id
 }
 
 resource "azurerm_subnet_network_security_group_association" "ad" {
   count                     = local.create_nsg ? 1 : 0
   subnet_id                 = local.create_admin_subnet ? azurerm_subnet.ad[0].id : data.azurerm_subnet.ad[0].id
-  network_security_group_id = azurerm_network_security_group.common.id
+  network_security_group_id = azurerm_network_security_group.common[0].id
 }
 
 resource "azurerm_subnet_network_security_group_association" "compute" {
   count                     = local.create_nsg ? 1 : 0
   subnet_id                 = local.create_admin_subnet ? azurerm_subnet.compute[0].id : data.azurerm_subnet.compute[0].id
-  network_security_group_id = azurerm_network_security_group.common.id
+  network_security_group_id = azurerm_network_security_group.common[0].id
 }
 
 resource "azurerm_subnet_network_security_group_association" "admin" {
   count                     = local.create_nsg ? 1 : 0
   subnet_id                 = local.create_admin_subnet ? azurerm_subnet.admin[0].id : data.azurerm_subnet.admin[0].id
-  network_security_group_id = azurerm_network_security_group.common.id
+  network_security_group_id = azurerm_network_security_group.common[0].id
+}
+
+resource "azurerm_subnet_network_security_group_association" "outbounddns" {
+  count                     = local.create_nsg ? (local.no_outbounddns_subnet ? 0 : 1) : 0
+  subnet_id                 = local.create_outbounddns_subnet ? azurerm_subnet.outbounddns[0].id : data.azurerm_subnet.outbounddns[0].id
+  network_security_group_id = azurerm_network_security_group.common[0].id
 }

@@ -2,6 +2,7 @@
   yum:
     name: gcc, make
     state: present
+    lock_timeout : 180
 
 - name: Download Pyxis plugin
   unarchive:
@@ -43,7 +44,7 @@
 
 - name: create pyxis.conf
   copy:
-    content: "required /usr/lib64/slurm/spank_pyxis.so"
+    content: "required /usr/lib64/slurm/spank_pyxis.so runtime_path=/mnt/resource/enroot-runtime"
     dest: /sched/plugstack.conf.d/pyxis.conf
     owner: slurm
     group: slurm
@@ -64,13 +65,6 @@
     - plugstack.conf
     - plugstack.conf.d
 
-- name: create slurm prolog for pyxis
-  template:
-    src: templates/prolog.sh.j2
-    dest: /sched/scripts/prolog.sh
-    owner: slurm
-    group: slurm
-    mode: 0755
 
 - name: restart slurmctld
   service:

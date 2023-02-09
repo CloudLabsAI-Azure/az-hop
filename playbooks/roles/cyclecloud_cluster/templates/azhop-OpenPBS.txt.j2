@@ -24,7 +24,6 @@ Autoscale = true
         cyclecloud.converge_on_boot = true
         # False => This is to avoid hostnames to be renamed ip-XXXXXXXX
         cyclecloud.hosts.standalone_dns.enabled = false
-        #cyclecloud.dns.domain = {{ad_join_domain}}
 
         # Disable normal NFS exports and mounts
         cyclecloud.mounts.sched.disabled = true
@@ -33,8 +32,14 @@ Autoscale = true
         cyclecloud.exports.shared.disabled = true
         cyclecloud.exports.sched.samba.enabled = false
         cyclecloud.exports.shared.samba.enabled = false
-        cyclecloud.exports.defaults.samba.enabled = false      
+        cyclecloud.exports.defaults.samba.enabled = false
         cshared.server.legacy_links_disabled = true
+
+        # Autoscale settings - If not defined default to the CycleCloud value which is 1800 seconds
+        {% if autoscale.idle_timeout is defined %}
+        cyclecloud.cluster.autoscale.idle_time_after_jobs = {{autoscale.idle_timeout}}
+        cyclecloud.cluster.autoscale.idle_time_before_jobs = {{autoscale.idle_timeout}}
+        {% endif %}
 
         [[[volume boot]]] 
         StorageAccountType = StandardSSD_LRS
@@ -52,6 +57,7 @@ Autoscale = true
   {% if queue.spot is defined %}
     Interruptible = {{queue.spot}}
   {% endif %}
+    Azure.MaxScaleSetSize = {{ queue.MaxScaleSetSize | default(100) }}
     # Lookup image version for that queue
   {% if cc_image_lookup is iterable and queue.name in cc_image_lookup %}
     ImageName = {{ cc_image_lookup[queue.name] }}
@@ -66,4 +72,12 @@ Autoscale = true
   {% endif %}
         [[[configuration]]]
         pbspro.slot_type = {{ queue.name }}
+        # Specific Autoscale settings
+        {% if queue.idle_timeout is defined %}
+        cyclecloud.cluster.autoscale.idle_time_after_jobs = {{queue.idle_timeout}}
+        cyclecloud.cluster.autoscale.idle_time_before_jobs = {{queue.idle_timeout}}
+        {% endif %}
+      {% if (enroot_enabled | default(false)) %}
+        [[[cluster-init enroot:default:1.0.0]]]
+      {% endif %}
 {% endfor %}

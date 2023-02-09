@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
-ANSIBLE_VERSION=5.8.0
+ANSIBLE_VERSION_UBUNTU=5.8.0
+ANSIBLE_VERSION_CENTOS=4.10.0
+
+os_release=$(cat /etc/os-release | grep "^ID\=" | cut -d'=' -f 2 | xargs)
+os_release=${os_release^^}
+
 THIS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 if [[ `pip3 list pypsrp` == *"pypsrp"* ]]; then 
@@ -12,6 +17,11 @@ if [[ `pip3 list PySocks` == *"PySocks"* ]]; then
   echo PySocks is already installed 
 else
   pip3 install PySocks
+fi
+if [[ `pip3 list netaddr` == *"netaddr"* ]]; then 
+  echo netaddr is already installed 
+else
+  pip3 install netaddr
 fi
 
 ansible-galaxy collection install ansible.windows
@@ -36,7 +46,8 @@ fi
 ansible --version
 pip3 list | grep ansible
 version=$(pip3 list | grep ansible | sort | head -n 1 | xargs | cut -d' ' -f 2)
-if [ "$version" != $ANSIBLE_VERSION ]; then
-  echo "Ansible version is $ansible_version. Please run ./toolset/scripts/install.sh to install the correct version of Ansible"
+ANSIBLE_VERSION="ANSIBLE_VERSION_$os_release"
+if [ "$version" != ${!ANSIBLE_VERSION} ]; then
+  echo "Ansible version is ${!ANSIBLE_VERSION}. Please run ./toolset/scripts/install.sh to install the correct version of Ansible"
   exit 1
 fi

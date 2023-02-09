@@ -48,6 +48,21 @@ export TF_CLI_ARGS_apply="-auto-approve"
 #export TF_LOG=INFO
 #export TF_LOG_PATH=.terraform/terraform.log
 
+# If an existing terraform state exists for a different resource group, then delete it.
+if [ -e $THIS_DIR/tf/terraform.tfstate ]; then
+  rg_in_state=$(jq -r '.resources[] | select(.type=="azurerm_resource_group") | .instances[] | .attributes.name' $THIS_DIR/tf/terraform.tfstate)
+  rg_in_config=$(yq eval '.resource_group' $AZHOP_CONFIG)
+  set +e
+  echo $rg_in_state | grep -w -q $rg_in_config
+  if [ $? -eq 1 ]; then
+    echo "Deleting existing terraform state for resource group $rg_in_state"
+    rm -rf $THIS_DIR/tf/terraform.tfstate
+  else
+    echo "Keep existing terraform state for resource group $rg_in_state"
+  fi
+  set -e
+fi
+
 function get_storage_id {
   # get the storage account ID to use
   id=$(az storage account list -g $RESOURCE_GROUP --query "[?contains(@.name, 'storage')==\`true\`].id" | jq -r '.[0]')
@@ -168,6 +183,9 @@ else
           rgname=$(echo $mds | jq -r '.compute.resourceGroupName')
           echo " - logged in Azure with System Assigned Identity from ${vmname}/${rgname}"
           export TF_VAR_logged_user_objectId=$(az resource list -n $vmname -g $rgname --query [*].identity.principalId --out tsv)
+          if [ "$TF_VAR_logged_user_objectId" == "" ]; then
+            export TF_VAR_logged_user_objectId=$(az resource list -n $vmname -g $rgname --query [*].identity.userAssignedIdentities.*.principalId --out tsv)
+          fi
           export ARM_TENANT_ID=${TF_VAR_tenant_id}
           export ARM_SUBSCRIPTION_ID=${subscription_id}
           export ARM_USE_MSI=true
@@ -223,14 +241,17 @@ esac
 
 
 # -parallelism=30
-TF_LOG="TRACE"
-TF_LOG_PATH="$THIS_DIR/tf/terraform.log"
+set +e
+export TF_LOG="INFO"
+export TF_LOG_PATH="$THIS_DIR/tf/terraform.log"
 rm -f $TF_LOG_PATH
 retries=1
 do_retry=true
+exit_code=0
 while (( $retries < 3 )) && [ "$do_retry" == "true" ]; do
   terraform -chdir=$TF_FOLDER $TF_COMMAND $PARAMS
-  if [ $? -eq 0 ]; then
+  exit_code=$?
+  if [ $exit_code -eq 0 ]; then
     do_retry=false
   else
     grep "RetryableError" $TF_LOG_PATH
@@ -248,3 +269,4 @@ done
 if [ -e $TF_FOLDER/terraform.tfstate ] && [ $TF_FOLDER != $THIS_DIR/tf ]; then
   cp -u -f $TF_FOLDER/terraform.tfstate $THIS_DIR/tf/terraform.tfstate
 fi
+exit $exit_code

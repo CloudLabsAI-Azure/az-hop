@@ -24,9 +24,45 @@ locals {
         CreatedOn = timestamp()
     }
 
+    # the PUID for telemetry is meant to be unique and identifies azhop, so it should not be changed
+    telem_azhop_puid  = "58d16d1a-5b7c-11ed-8042-00155d5d7a47"
+
+    # local to determine if the user chose to disable telemetry of azhop
+    optout_telemetry = try(local.configuration_yml["optout_telemetry"], false)
+
+    telem_azhop_name = substr(
+        format(
+            "pid-%s",
+            local.telem_azhop_puid
+        ),
+        0,
+        64
+    )
+
+    # empty arm template to create the telemetry resource
+    telem_arm_subscription_template_content = <<TEMPLATE
+    {
+        "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+        "contentVersion": "1.0.0.0",
+        "parameters": {},
+        "variables": {},
+        "resources": [],
+        "outputs": {
+            "telemetry": {
+                "type": "String",
+                "value": "For more information, see https://azure.github.io/az-hop/deploy/telemetry.html"
+            }
+        }
+    }
+    TEMPLATE
+
+    ad_ha = try(local.configuration_yml["ad"].high_availability, false)
+    domain_controlers = local.ad_ha ? {ad="ad", ad2="ad2"} : {ad="ad"}
+
     # Use a linux custom image reference if the linux_base_image is defined and contains ":"
     use_linux_image_reference = try(length(split(":", local.configuration_yml["linux_base_image"])[1])>0, false)
-    #use_linux_image_reference = false
+    # Use a lustre custom image reference if the lustre_base_image is defined and contains ":"
+    use_lustre_image_reference = try(length(split(":", local.configuration_yml["lustre_base_image"])[1])>0, false)
     # Use a linux custom image reference if the linux_base_image is defined and contains ":"
     use_windows_image_reference = try(length(split(":", local.configuration_yml["windows_base_image"])[1])>0, false)
 
@@ -36,37 +72,45 @@ locals {
         sku       = local.use_linux_image_reference ? split(":", local.configuration_yml["linux_base_image"])[2] : "7_9-gen2"
         version   = local.use_linux_image_reference ? split(":", local.configuration_yml["linux_base_image"])[3] : "latest"
     }
+    lustre_base_image_reference = {
+        publisher = local.use_lustre_image_reference ? split(":", local.configuration_yml["lustre_base_image"])[0] : "azhpc"
+        offer     = local.use_lustre_image_reference ? split(":", local.configuration_yml["lustre_base_image"])[1] : "azurehpc-lustre"
+        sku       = local.use_lustre_image_reference ? split(":", local.configuration_yml["lustre_base_image"])[2] : "azurehpc-lustre-2_12"
+        version   = local.use_lustre_image_reference ? split(":", local.configuration_yml["lustre_base_image"])[3] : "latest"
+    }
     windows_base_image_reference = {
-        publisher = local.use_linux_image_reference ? split(":", local.configuration_yml["windows_base_image"])[0] : "MicrosoftWindowsServer"
-        offer     = local.use_linux_image_reference ? split(":", local.configuration_yml["windows_base_image"])[1] : "WindowsServer"
-        sku       = local.use_linux_image_reference ? split(":", local.configuration_yml["windows_base_image"])[2] : "2016-Datacenter-smalldisk"
-        version   = local.use_linux_image_reference ? split(":", local.configuration_yml["windows_base_image"])[3] : "latest"
+        publisher = local.use_windows_image_reference ? split(":", local.configuration_yml["windows_base_image"])[0] : "MicrosoftWindowsServer"
+        offer     = local.use_windows_image_reference ? split(":", local.configuration_yml["windows_base_image"])[1] : "WindowsServer"
+        sku       = local.use_windows_image_reference ? split(":", local.configuration_yml["windows_base_image"])[2] : "2019-Datacenter-smalldisk"
+        version   = local.use_windows_image_reference ? split(":", local.configuration_yml["windows_base_image"])[3] : "latest"
     }
 
     # Use a linux custom image id if the linux_base_image is defined and contains "/"
     use_linux_image_id = try(length(split("/", local.configuration_yml["linux_base_image"])[1])>0, false)
     linux_image_id = local.use_linux_image_id ? local.configuration_yml["linux_base_image"] : null
 
+    # Use a lustre custom image id if the lustre_base_image is defined and contains "/"
+    use_lustre_image_id = try(length(split("/", local.configuration_yml["lustre_base_image"])[1])>0, false)
+    lustre_image_id = local.use_lustre_image_id ? local.configuration_yml["lustre_base_image"] : null
+
     # Use a windows custom image id if the windows_base_image is defined and contains "/"
     use_windows_image_id = try(length(split("/", local.configuration_yml["windows_base_image"])[1])>0, false)
     windows_image_id = local.use_windows_image_id ? local.configuration_yml["windows_base_image"] : null
 
-    _linux_base_image_plan = {}
-    # _cis_image_reference = {
-    #     publisher = "center-for-internet-security-inc"
-    #     offer     = "cis-centos-7-v2-1-1-l1"
-    #     sku       = "cis-centos7-l1"
-    #     version   = "3.1.5"
-    # }
-    # _cis_image_plan = {
-    #     name      = "cis-centos7-l1"
-    #     publisher = "center-for-internet-security-inc"
-    #     product   = "cis-centos-7-v2-1-1-l1"
-    # }
+    _empty_image_plan = {}
+    _linux_base_image_plan = {
+        publisher = try(split(":", local.configuration_yml["linux_base_plan"])[0], "")
+        product   = try(split(":", local.configuration_yml["linux_base_plan"])[1], "")
+        name      = try(split(":", local.configuration_yml["linux_base_plan"])[2], "")
+    }
+    linux_image_plan = try( length(local._linux_base_image_plan.publisher) > 0 ? local._linux_base_image_plan : local._empty_image_plan, local._empty_image_plan)
 
-    base_image_plan = {}
-    #linux_base_image_reference = local.use_linux_image_reference ? local._cis_image_reference : local._linux_base_image_reference
-    #base_image_plan = local.enable_cis ? local._cis_image_plan : local._linux_base_image_plan
+    _lustre_base_image_plan = {
+        publisher = try(split(":", local.configuration_yml["lustre_base_plan"])[0], "azhpc")
+        product   = try(split(":", local.configuration_yml["lustre_base_plan"])[1], "azurehpc-lustre")
+        name      = try(split(":", local.configuration_yml["lustre_base_plan"])[2], "azurehpc-lustre-2_12")
+    }
+    lustre_image_plan = try( length(local._lustre_base_image_plan.publisher) > 0 ? local._lustre_base_image_plan : local._empty_image_plan, local._empty_image_plan)
 
     # Create the RG if not using an existing RG and (creating a VNET or when reusing a VNET in another resource group)
     use_existing_rg = try(local.configuration_yml["use_existing_rg"], false)
@@ -85,19 +129,27 @@ locals {
     key_vault_readers = try(local.configuration_yml["key_vault_readers"], null)
 
     # Lustre
+    lustre_enabled = try(local.configuration_yml["features"]["lustre"], try(local.configuration_yml["lustre"]["oss_count"] > 0, false))
     lustre_archive_account = try(local.configuration_yml["lustre"]["hsm"]["storage_account"], null)
     lustre_rbh_sku = try(local.configuration_yml["lustre"]["rbh_sku"], "Standard_D8d_v4")
     lustre_mds_sku = try(local.configuration_yml["lustre"]["mds_sku"], "Standard_D8d_v4")
     lustre_oss_sku = try(local.configuration_yml["lustre"]["oss_sku"], "Standard_D32d_v4")
-    lustre_oss_count = try(local.configuration_yml["lustre"]["oss_count"], 2)
+    lustre_oss_count = try(local.configuration_yml["lustre"]["oss_count"], local.lustre_enabled ? 2 : 0)
 
+    # Use a jumpbox when defined
+    jumpbox_enabled = try(length(local.configuration_yml["jumpbox"]) > 0, false)
     # Enable Windows Remote Visualization scenarios
     enable_remote_winviz = try(local.configuration_yml["enable_remote_winviz"], false)
 
-    # Slurm Accounting Database
-    slurm_accounting = local.enable_remote_winviz || try(local.configuration_yml["slurm"].accounting_enabled, false)
-    slurm_accounting_admin_user = "sqladmin"
-    
+    # Queue manager
+    queue_manager = try(local.configuration_yml["queue_manager"], "openpbs")
+
+    # Create Database
+    create_database  = ( local.enable_remote_winviz || try(local.configuration_yml["slurm"].accounting_enabled, false) ) && (! local.use_existing_database)
+    use_existing_database = try(length(local.configuration_yml["database"].fqdn) > 0 ? true : false, false)
+#    slurm_accounting = local.enable_remote_winviz || try(local.configuration_yml["slurm"].accounting_enabled, false)
+    database_user = local.create_database ? "sqladmin" : (local.use_existing_database ? try(local.configuration_yml["database"].user, "") : "")
+
     # VNET
     create_vnet = try(length(local.vnet_id) > 0 ? false : true, true)
     vnet_id = try(local.configuration_yml["network"]["vnet"]["id"], null)
@@ -134,29 +186,60 @@ locals {
     no_gateway_subnet = try(length(local.gateway_subnet) > 0 ? false : true, true )
     create_gateway_subnet  = try(local.gateway_subnet["create"], local.create_vnet )
 
+    outbounddns_subnet = try(local.configuration_yml["network"]["vnet"]["subnets"]["outbounddns"], null)
+    no_outbounddns_subnet = try(length(local.outbounddns_subnet) > 0 ? false : true, true )
+    create_outbounddns_subnet  = try(local.outbounddns_subnet["create"], local.create_vnet ? (local.no_outbounddns_subnet ? false : true) : false )
+
     subnets = merge(local._subnets, 
                     local.no_bastion_subnet ? {} : {bastion = "AzureBastionSubnet"},
-                    local.no_gateway_subnet ? {} : {gateway = "GatewaySubnet"}
+                    local.no_gateway_subnet ? {} : {gateway = "GatewaySubnet"},
+                    local.no_outbounddns_subnet ? {} : {outbounddns = "outbounddns"}
                     )
 
     # Application Security Groups
     create_nsg = try(local.configuration_yml["network"]["create_nsg"], local.create_vnet )
-    default_asgs = ["asg-ssh", "asg-rdp", "asg-jumpbox", "asg-ad", "asg-ad-client", "asg-lustre", "asg-lustre-client", "asg-pbs", "asg-pbs-client", "asg-cyclecloud", "asg-cyclecloud-client", "asg-nfs-client", "asg-telegraf", "asg-grafana", "asg-robinhood", "asg-ondemand", "asg-deployer", "asg-guacamole"]
-    asgs = { for v in local.default_asgs : v => v }
+    # If create NSG then use the local resource group otherwise use the configured one. Default to local resource group
+    asg_resource_group = local.create_nsg ? local.resource_group : try(length(local.configuration_yml["network"]["asg"]["resource_group"]) > 0 ? local.configuration_yml["network"]["asg"]["resource_group"] : local.resource_group, local.resource_group )
+
+    _default_asgs = {
+        asg-ssh = "asg-ssh"
+        asg-rdp = "asg-rdp"
+        asg-jumpbox = "asg-jumpbox"
+        asg-ad = "asg-ad"
+        asg-ad-client = "asg-ad-client"
+        asg-lustre = "asg-lustre"
+        asg-lustre-client = "asg-lustre-client"
+        asg-pbs = "asg-pbs"
+        asg-pbs-client = "asg-pbs-client"
+        asg-cyclecloud = "asg-cyclecloud"
+        asg-cyclecloud-client = "asg-cyclecloud-client"
+        asg-nfs-client = "asg-nfs-client"
+        asg-telegraf = "asg-telegraf"
+        asg-grafana = "asg-grafana"
+        asg-robinhood = "asg-robinhood"
+        asg-ondemand = "asg-ondemand"
+        asg-deployer = "asg-deployer"
+        asg-guacamole = "asg-guacamole"
+        asg-mariadb-client = "asg-mariadb-client"
+    }
+    #asgs = local.create_nsg ? local._default_asgs :  try(local.configuration_yml["network"]["asg"]["names"], local._default_asgs)
+    asgs = try(local.configuration_yml["network"]["asg"]["names"], local._default_asgs)
+    #asgs = { for v in local.default_asgs : v => v }
     empty_array = []
     empty_map = { for v in local.empty_array : v => v }
 
     # VM name to list of ASGs associations
+    # TODO : Add mapping for names
     asg_associations = {
-        ad        = ["asg-ad", "asg-rdp"]
+        ad        = ["asg-ad", "asg-rdp", "asg-ad-client"] # asg-ad-client will allow the secondary DC scenario
         ccportal  = ["asg-ssh", "asg-cyclecloud", "asg-telegraf", "asg-ad-client"]
         grafana   = ["asg-ssh", "asg-grafana", "asg-ad-client", "asg-telegraf", "asg-nfs-client"]
         jumpbox   = ["asg-ssh", "asg-jumpbox", "asg-ad-client", "asg-telegraf", "asg-nfs-client"]
         lustre    = ["asg-ssh", "asg-lustre", "asg-lustre-client", "asg-telegraf"]
-        ondemand  = ["asg-ssh", "asg-ondemand", "asg-ad-client", "asg-nfs-client", "asg-pbs-client", "asg-lustre-client", "asg-telegraf", "asg-guacamole", "asg-cyclecloud-client"]
+        ondemand  = ["asg-ssh", "asg-ondemand", "asg-ad-client", "asg-nfs-client", "asg-pbs-client", "asg-lustre-client", "asg-telegraf", "asg-guacamole", "asg-cyclecloud-client", "asg-mariadb-client"]
         robinhood = ["asg-ssh", "asg-robinhood", "asg-lustre-client", "asg-telegraf"]
-        scheduler = ["asg-ssh", "asg-pbs", "asg-ad-client", "asg-cyclecloud-client", "asg-nfs-client", "asg-telegraf"]
-        guacamole = ["asg-ssh", "asg-ad-client", "asg-telegraf", "asg-nfs-client", "asg-cyclecloud-client"]
+        scheduler = ["asg-ssh", "asg-pbs", "asg-ad-client", "asg-cyclecloud-client", "asg-nfs-client", "asg-telegraf", "asg-mariadb-client"]
+        guacamole = ["asg-ssh", "asg-ad-client", "asg-telegraf", "asg-nfs-client", "asg-cyclecloud-client", "asg-mariadb-client"]
     }
 
     # Open ports for NSG TCP rules
@@ -167,7 +250,6 @@ locals {
         Web = ["443", "80"]
         Ssh    = ["22"]
         Public_Ssh = [local.jumpbox_ssh_port]
-        Socks = ["5985"]
         # DNS, Kerberos, RpcMapper, Ldap, Smb, KerberosPass, LdapSsl, LdapGc, LdapGcSsl, AD Web Services, RpcSam
         DomainControlerTcp = ["53", "88", "135", "389", "445", "464", "686", "3268", "3269", "9389", "49152-65535"]
         # DNS, Kerberos, W32Time, NetBIOS, Ldap, KerberosPass, LdapSsl
@@ -180,14 +262,17 @@ locals {
         Slurmd = ["6818"]
         Lustre = ["635", "988"]
         Nfs = ["111", "635", "2049", "4045", "4046"]
+        SMB = ["445"]
         Telegraf = ["8086"]
         Grafana = ["3000"]
         # HTTPS, AMQP
         CycleCloud = ["9443", "5672"],
-        # MySQL
-        MySQL = ["3306", "33060"],
+        # MariaDB
+        MariaDB = ["3306", "33060"],
         # Guacamole
         Guacamole = ["8080"]
+        # WinRM
+        WinRM = ["5985", "5986"]
     }
 
     # Array of NSG rules to be applied on the common NSG
@@ -262,12 +347,15 @@ locals {
         AllowGrafanaIn              = ["510", "Inbound", "Allow", "Tcp", "Grafana",            "asg/asg-ondemand",          "asg/asg-grafana"],
 
         # Admin and Deployment
-        AllowSocksIn                = ["520", "Inbound", "Allow", "Tcp", "Socks",              "asg/asg-jumpbox",          "asg/asg-rdp"],
+        AllowWinRMIn                = ["520", "Inbound", "Allow", "Tcp", "WinRM",              "asg/asg-jumpbox",          "asg/asg-rdp"],
         AllowRdpIn                  = ["550", "Inbound", "Allow", "Tcp", "Rdp",                "asg/asg-jumpbox",          "asg/asg-rdp"],
 
         # Guacamole
 #        AllowGuacamoleWebIn         = ["600", "Inbound", "Allow", "Tcp", "Guacamole",           "asg/asg-ondemand",          "asg/asg-guacamole"],
         AllowGuacamoleRdpIn         = ["610", "Inbound", "Allow", "Tcp", "Rdp",                 "asg/asg-guacamole",         "subnet/compute"],
+
+        # MariaDB
+        AllowMariaDBIn              = ["700", "Inbound", "Allow", "Tcp", "MariaDB",             "asg/asg-mariadb-client",    "subnet/admin"],
 
         # Deny all remaining traffic
         DenyVnetInbound             = ["3100", "Inbound", "Deny", "*", "All",                  "tag/VirtualNetwork",       "tag/VirtualNetwork"],
@@ -321,6 +409,9 @@ locals {
         AllowNfsOut                 = ["440", "Outbound", "Allow", "*",   "Nfs",                "asg/asg-nfs-client",       "subnet/netapp"],
         AllowNfsComputeOut          = ["450", "Outbound", "Allow", "*",   "Nfs",                "subnet/compute",           "subnet/netapp"],
 
+        # SMB
+        AllowSMBComputeOut          = ["455", "Outbound", "Allow", "*",   "SMB",                "subnet/compute",            "subnet/netapp"],
+
         # Telegraf / Grafana
         AllowTelegrafOut            = ["460", "Outbound", "Allow", "Tcp", "Telegraf",           "asg/asg-telegraf",          "asg/asg-grafana"],
         AllowComputeTelegrafOut     = ["470", "Outbound", "Allow", "Tcp", "Telegraf",           "subnet/compute",            "asg/asg-grafana"],
@@ -340,12 +431,15 @@ locals {
 
         # Admin and Deployment
         AllowRdpOut                 = ["570", "Outbound", "Allow", "Tcp", "Rdp",                "asg/asg-jumpbox",          "asg/asg-rdp"],
-        AllowSocksOut               = ["580", "Outbound", "Allow", "Tcp", "Socks",              "asg/asg-jumpbox",          "asg/asg-rdp"],
+        AllowWinRMOut               = ["580", "Outbound", "Allow", "Tcp", "WinRM",              "asg/asg-jumpbox",          "asg/asg-rdp"],
         AllowDnsOut                 = ["590", "Outbound", "Allow", "*",   "Dns",                "tag/VirtualNetwork",       "tag/VirtualNetwork"],
 
         # Guacamole
 #        AllowGuacamoleWebOut        = ["600", "Outbound", "Allow", "Tcp", "Guacamole",           "asg/asg-ondemand",         "asg/asg-guacamole"],
         AllowGuacamoleRdpOut        = ["610", "Outbound", "Allow", "Tcp", "Rdp",                 "asg/asg-guacamole",         "subnet/compute"],
+
+        # MariaDB
+        AllowMariaDBOut             = ["700", "Outbound", "Allow", "Tcp", "MariaDB",             "asg/asg-mariadb-client",    "subnet/admin"],
 
         # Deny all remaining traffic and allow Internet access
         AllowInternetOutBound       = ["3000", "Outbound", "Allow", "Tcp", "All",               "tag/VirtualNetwork",       "tag/Internet"],
@@ -360,6 +454,7 @@ locals {
     hub_nsg_rules = {
         AllowHubSshIn          = ["200", "Inbound", "Allow", "Tcp", "Public_Ssh",               "tag/VirtualNetwork", "asg/asg-jumpbox"],
         AllowHubHttpIn         = ["210", "Inbound", "Allow", "Tcp", "Web",                      "tag/VirtualNetwork", "asg/asg-ondemand"],
+        AllowPackerWinRMIn     = ["560", "Inbound", "Allow", "Tcp", "WinRM",                    "tag/VirtualNetwork", "subnet/compute"],
     }
 
     bastion_nsg_rules = {

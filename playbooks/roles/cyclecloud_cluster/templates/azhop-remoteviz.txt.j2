@@ -24,7 +24,6 @@ Autoscale = true
         cyclecloud.converge_on_boot = true
         # False => This is to avoid hostnames to be renamed ip-XXXXXXXX
         cyclecloud.hosts.standalone_dns.enabled = false
-        #cyclecloud.dns.domain = {{ad_join_domain}}
 
         # Disable normal NFS exports and mounts
         cyclecloud.mounts.sched.disabled = true
@@ -51,6 +50,7 @@ Autoscale = true
   {% if queue.spot is defined %}
     Interruptible = {{queue.spot}}
   {% endif %}
+    Azure.MaxScaleSetSize = {{ queue.MaxScaleSetSize | default(100) }}
     # Lookup image version for that queue
   {% if cc_image_lookup is iterable and queue.name in cc_image_lookup %}
     ImageName = {{ cc_image_lookup[queue.name] }}

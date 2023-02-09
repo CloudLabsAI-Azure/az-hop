@@ -7,12 +7,12 @@ name = InfluxDB Repository - RHEL \$releasever
 baseurl = https://repos.influxdata.com/centos/\$releasever/\$basearch/stable
 enabled = 1
 gpgcheck = 1
-gpgkey = https://repos.influxdata.com/influxdb.key
+gpgkey = https://repos.influxdata.com/influxdata-archive_compat.key
 EOF
 fi
 
 if ! rpm -q telegraf; then
   echo "#### Telegraf Installation:"
-  yum -y install https://dl.influxdata.com/telegraf/releases/telegraf-1.18.2-1.x86_64.rpm jq
+  yum -y install telegraf jq
 fi
 

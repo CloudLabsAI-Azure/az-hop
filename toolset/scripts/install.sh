@@ -15,7 +15,8 @@ apt install -y \
      wget \
      git \
      dnsutils \
-     yamllint
+     yamllint \
+     pwgen
 #     ca-certificates \
 #     file \
 #     ftp \
@@ -43,7 +44,11 @@ apt install -y \
 # Install AzCLI
 #
 echo "Installing AzCLI ..."
-curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+while ! which az >/dev/null 2>&1; do
+    curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+done
+echo "Allow installing AZCLI extensions without prompt"
+az config set extension.use_dynamic_install=yes_without_prompt
 
 #
 # Install AzCopy
@@ -65,6 +70,7 @@ pip3 install ansible==5.8.0
 echo "Installing Ansible playbooks pre-reqs"
 pip3 install pypsrp
 pip3 install PySocks
+pip3 install netaddr
 
 ansible-galaxy collection install ansible.windows
 ansible-galaxy collection install community.windows
@@ -93,7 +99,7 @@ apt-get install packer
 # Install yq
 #
 echo "Installing yq...."
-VERSION=v4.13.3
+VERSION=v4.25.3
 BINARY=yq_linux_amd64
 wget https://github.com/mikefarah/yq/releases/download/${VERSION}/${BINARY} -O /usr/bin/yq && chmod +x /usr/bin/yq
 
@@ -103,29 +109,29 @@ rm -f /tmp/*.zip && rm -f /tmp/*.gz && \
 echo "=============="
 echo "Python version"
 echo "=============="
-python3 --version
+python3 --version || exit 1
 echo "==============="
 echo "Ansible version"
 echo "==============="
-ansible --version
+ansible --version || exit 1
 echo "================="
 echo "Terraform version"
 echo "================="
-terraform --version
+terraform --version || exit 1
 echo "=============="
 echo "Packer version"
 echo "=============="
-packer --version
+packer --version || exit 1
 echo "=========="
 echo "AZ version"
 echo "=========="
-az --version
+az --version || exit 1
 echo "=========="
 echo "AZ Copy version"
 echo "=========="
-azcopy --version
+azcopy --version || exit 1
 echo "=========="
 echo "yq version"
 echo "=========="
-yq --version
+yq --version || exit 1
 echo "End"

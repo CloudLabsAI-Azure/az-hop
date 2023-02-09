@@ -21,13 +21,27 @@
         connection: local
         register: ad_join_password
 
+      - name: cleanup any remaining socks tunnel
+        shell: ps aux | grep localhost:5985 | grep -v grep | awk '{print "kill -9 " $2}' | sh
+        delegate_to: localhost
+        connection: local
+        ignore_errors: true
+        when: (jumpbox is defined)
+
       - name: start socks tunnel
         shell: ssh -i {{ lookup('env', 'PWD') }}/{{ansible_ssh_private_key_file}} -fN -D localhost:5985 -p {{jumpbox_ssh_port}} -o StrictHostKeyChecking=no {{admin_user}}@{{ psrp_ssh_proxy }}
         delegate_to: localhost
         connection: local
+        when: (jumpbox is defined)
 
       - name: Run command to mitigate AD vulnerability 
         win_command: netsh int ipv4 set global sourceroutingbehavior=drop 
+
+      - name: Set lookup addresses on all visible adapters on Azure DNS
+        ansible.windows.win_dns_client:
+          adapter_names: '*'
+          dns_servers:
+          - 168.63.129.16
 
       - name: Install AD-Domain-Services
         win_feature:
@@ -51,9 +65,19 @@
 
       - name: Create AD-Domain
         ansible.windows.win_domain:
-          dns_domain_name: '{{ad_join_domain}}'
+          dns_domain_name: '{{domain_name}}'
           safe_mode_password: '{{ad_join_password.stdout}}'
         register: ad_promotion
+
+      # - name: Promote server
+      #   ansible.windows.win_domain_controller:
+      #     dns_domain_name: '{{domain_name}}'
+      #     domain_admin_user: '{{domain_name}}\{{admin_user}}'
+      #     domain_admin_password: '{{ad_join_password.stdout}}'
+      #     safe_mode_password: '{{ad_join_password.stdout}}'
+      #     install_dns: yes
+      #     state: domain_controller
+      #   register: ad_promotion
 
       - name: Reboot after promotion
         ansible.windows.win_reboot:
@@ -64,7 +88,7 @@
         community.windows.win_domain_group:
           name: Domain Users
           attributes:
-            gidnumber: 5000
+            gidnumber: "{{ (usergroups | selectattr('name', 'match', 'Domain Users') | map(attribute='gid')) | default(5000, true) }}"
 
       - name: Disable password expiration
         win_domain_user:
@@ -73,29 +97,15 @@
           password_never_expires: true
           update_password: on_create
 
-      - name: Add DNS Forwarders
-        community.windows.win_dns_zone:
+      - name: Update azhop groups gidnumber
+        community.windows.win_domain_group:
           name: '{{item.name}}'
-          type: forwarder
-          dns_servers: "{{item.ips}}"
-          replication: none
           state: present
-        with_items: '{{dns.forwarders}}'
-        when: dns.forwarders is defined
-
-      - name: Add az-hop admin group
-        community.windows.win_domain_group:
-          name: az-hop-admins
-          state: present
-          description: Members of this group can perform administrative tasks on the az-hop environment
+          description: '{{item.description | default("az-hop group - item.name")}}'
           scope: domainlocal
-
-      - name: Add az-hop local admin group
-        community.windows.win_domain_group:
-          name: az-hop-localadmins
-          state: present
-          description: Members of this group are in the administrators group of Windows nodes
-          scope: domainlocal
+          attributes:
+            gidnumber: '{{item.gid}}'
+        loop: "{{usergroups  | selectattr('gid', 'ge', 5001) }}"
 
     always:
       - name: close session on local port
@@ -103,3 +113,4 @@
         delegate_to: localhost
         connection: local
         ignore_errors: true
+        when: (jumpbox is defined)

@@ -20,16 +20,32 @@
             "winrm_username": "packer",
 
             "build_resource_group_name": "{{user `var_resource_group`}}",
+            "private_virtual_network_with_public_ip": "{{user `var_private_virtual_network_with_public_ip`}}",
+            "virtual_network_name": "{{user `var_virtual_network_name`}}",
+            "virtual_network_subnet_name": "{{user `var_virtual_network_subnet_name`}}",
+            "virtual_network_resource_group_name": "{{user `var_virtual_network_resource_group_name`}}",
+            "build_key_vault_name": "{{user `var_key_vault_name`}}",
             "cloud_environment_name": "{{user `var_cloud_env`}}"
         }
     ],
     "provisioners": [{
-        "type": "powershell",
-        "scripts": [
-          "./scripts/windows/wait-for-agent.ps1",
-          "./scripts/windows/install-choco.ps1",
-          "./scripts/windows/optimize.ps1",
-          "./scripts/windows/sysprep.ps1"
-        ]
-      }]
+      "type": "powershell",
+      "scripts": [
+        "./scripts/windows/wait-for-agent.ps1",
+        "./scripts/windows/install-choco.ps1",
+        "./scripts/windows/optimize.ps1"
+      ]
+    },
+    {
+      "type": "windows-restart",
+      "restart_check_command": "powershell -command \"& {Write-Output 'restarted.'}\"",
+      "restart_timeout": "10m"
+    },
+    {
+      "type": "powershell",
+      "scripts": [
+        "./scripts/windows/sysprep.ps1"
+      ]
+    }
+  ]
 }

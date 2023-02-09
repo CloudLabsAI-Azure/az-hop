@@ -8,6 +8,7 @@ resource "azurerm_key_vault" "azhop" {
   location                    = local.create_rg ? azurerm_resource_group.rg[0].location : data.azurerm_resource_group.rg[0].location
   resource_group_name         = local.create_rg ? azurerm_resource_group.rg[0].name : data.azurerm_resource_group.rg[0].name
   enabled_for_disk_encryption = true
+  enabled_for_deployment      = true
   tenant_id                   = local.tenant_id
   # soft delete is enabled by default now (2021-8-25), with 90 days retention
   # soft_delete_enabled         = true
@@ -57,6 +58,32 @@ resource "azurerm_key_vault_secret" "admin_password" {
   depends_on   = [time_sleep.delay_create, azurerm_key_vault_access_policy.admin] # As policies are created in the same deployment add some delays to propagate
   name         = format("%s-password", local.admin_username)
   value        = random_password.password.result
+  key_vault_id = azurerm_key_vault.azhop.id
+
+  lifecycle {
+    ignore_changes = [
+      value
+    ]
+  }
+}
+
+resource "azurerm_key_vault_secret" "admin_ssh_private" {
+  depends_on   = [time_sleep.delay_create, azurerm_key_vault_access_policy.admin]
+  name         = format("%s-private", local.admin_username)
+  value        = tls_private_key.internal.private_key_pem
+  key_vault_id = azurerm_key_vault.azhop.id
+
+  lifecycle {
+    ignore_changes = [
+      value
+    ]
+  }
+}
+
+resource "azurerm_key_vault_secret" "admin_ssh_public" {
+  depends_on   = [time_sleep.delay_create, azurerm_key_vault_access_policy.admin] 
+  name         = format("%s-public", local.admin_username)
+  value        = tls_private_key.internal.public_key_openssh
   key_vault_id = azurerm_key_vault.azhop.id
 
   lifecycle {

@@ -9,8 +9,8 @@
   vars_files:
     - '{{global_config_file}}'
   vars:
-    ondemand_version: 2.0.23
-    ood_core_version: 0.18.1
+    ondemand_version: 2.0.29
+    ood_core_version: 0.22.0
 
   tasks:
   - name: Wait 300 seconds for the nodes to be ready
@@ -23,6 +23,8 @@
     yum:
       name: ca-certificates
       state: latest
+      lock_timeout : 180
+
   - name: Set up PAM authentication
     shell: |
       yum install -y mod_authnz_pam
@@ -122,6 +124,7 @@
         register: sslcert_chain
         delegate_to: localhost
         connection: local
+        become: false
 
       - name: copy chain cert files
         copy:
@@ -150,7 +153,7 @@
         connection: local
         become: false
         shell: |
-          openssl req -nodes -new -x509 -keyout {{ ondemand_fqdn }}.key -out {{ ondemand_fqdn }}.crt -subj "/CN="
+          openssl req -nodes -new -x509 -keyout {{ ondemand_fqdn }}.key -out {{ ondemand_fqdn }}.crt -subj "/CN={{ ondemand_fqdn }}"
         args:
           creates: "{{ ondemand_fqdn }}.crt"
 
@@ -192,11 +195,12 @@
       version: "azhop/{{ood_core_version}}"
       force: yes
 
-  - name: get the ondemand guacamole customization
-    get_url:
-      force: yes
-      dest: /var/www/ood/apps/sys/dashboard/app/models/active_jobs/jobstatusdata.rb
-      url: https://raw.githubusercontent.com/xpillons/ondemand/azhop/release_2.0/apps/dashboard/app/models/active_jobs/jobstatusdata.rb
+  # - name: get the ondemand guacamole customization
+  #   get_url:
+  #     force: yes
+  #     dest: /var/www/ood/apps/sys/dashboard/app/models/active_jobs/jobstatusdata.rb
+  #     url: https://raw.githubusercontent.com/xpillons/ondemand/azhop/release_2.0/apps/dashboard/app/models/active_jobs/jobstatusdata.rb
+  #     timeout: 180
 
 #    not ( ondemand.generate_certificate | default(true) )
 
@@ -246,7 +250,7 @@
       apply:
         become: true
     vars:
-      cc_slurm_version: 20.11.7-1
+      cc_slurm_version: '{{slurm.slurm_version | default("20.11.9")}}-1'
       enroot_enabled: '{{slurm.enroot_enabled | default(false)}}'
     when: ( queue_manager is defined and queue_manager == "slurm" )
 
@@ -275,7 +279,8 @@
 
   - name: add modules for job submission
     yum: 
-      name: Lmod, hwloc, numactl 
+      name: Lmod, hwloc, numactl, jq
+      lock_timeout : 180
 
   - name: create ssh_config file
     copy:
@@ -284,20 +289,12 @@
           StrictHostKeyChecking=No
       dest: /etc/ssh/ssh_config
 
-  - include_role: 
-      name: ood-apps-cyclecloud
-      apply: 
-        become: true
-
-  - include_role: 
-      name: ood-apps-grafana
-      apply: 
-        become: true
-
-  - include_role: 
-      name: ood-apps-robinhood
-      apply: 
-        become: true
+  - name: Insert/Update Match group "domain users" configuration block in /etc/ssh/sshd_config
+    blockinfile:
+      path: /etc/ssh/sshd_config
+      block: |
+        Match group "domain users"
+          AllowUsers *
 
   - name: setup azcopy
     shell: |
@@ -308,56 +305,19 @@
     args:
       creates: /usr/local/bin/azcopy
 
-  - name: Add Lustre server repo
-    yum_repository:
-      name: lustreserver
-      description: Lustre repo
-      baseurl: https://downloads.whamcloud.com/public/lustre/lustre-2.12.6/el7/patchless-ldiskfs-server/
-      file: LustrePack
-      enabled: yes
-      gpgcheck: no
-
-  - name: Add Lustre client repo
-    yum_repository:
-      name: lustreclient
-      description: Lustre repo
-      baseurl: https://downloads.whamcloud.com/public/lustre/lustre-2.12.6/el7/client/
-      file: LustrePack
-      enabled: yes
-      gpgcheck: no
-
-  - name: Add e2fs repo
-    yum_repository:
-      name: e2fs
-      description: Lustre repo
-      baseurl: https://downloads.whamcloud.com/public/e2fsprogs/latest/el7/
-      file: LustrePack
-      enabled: yes
-      gpgcheck: no
-
-  - name: Install lustre packages
-    yum:
-      name:
-        - lustre-client
-      state: present
-    register: install_rpms
-
-  - name: run weak-modules
-    command: weak-modules --add-kernel --no-initramfs
-    when: install_rpms.changed
-
   - name: create lustre mount directory
     file:
       path: /lustre
       state: directory
       mode: 0777
-  - name: mount lustre
-    mount:
-      path: /lustre
-      src: lustre@tcp0:/LustreFS
-      opts: flock,defaults,_netdev
-      state: mounted
-      fstype: lustre
+    when: ( features.lustre | default(false) )
+
+  - name: Install Lustre Client
+    include_role:
+      name: lustre
+    vars:
+      install_client: true
+    when: ( features.lustre | default(false) )
 
   - name: create ood initialiser directory
     file:
@@ -365,14 +325,41 @@
       state: directory
 
   - name: create ood lustre menu option
-    copy:
-      dest: /etc/ood/config/apps/dashboard/initializers/ood.rb
-      content: |
-        # /etc/ood/config/apps/dashboard/initializers/ood.rb
+    lineinfile:
+      path: /etc/ood/config/apps/dashboard/initializers/ood.rb
+      search_string: /lustre
+      line : 'OodFilesApp.candidate_favorite_paths << FavoritePath.new("/lustre", title: "Lustre")'
+      create: yes
+      state: present
+    when: ( features.lustre | default(false) )
 
-        OodFilesApp.candidate_favorite_paths.tap do |paths|
-          paths << FavoritePath.new("/lustre", title: "Lustre")
-        end
+  - name: Create "{{mounts[item].mountpoint}}" directory mountpoint
+    file:
+      path: '{{mounts[item].mountpoint}}'
+      state: directory
+      mode: '0755'
+    loop: "{{mounts | list}}"
+    when: item != 'home'
+
+  - name: Mount "{{ mounts[item].server }}:/{{ mounts[item].export }}"
+    mount:
+      src: '{{ mounts[item].server }}:/{{ mounts[item].export }}'
+      path: '{{mounts[item].mountpoint}}'
+      opts: '{{ mounts[item].options | default("rw,hard,rsize=262144,wsize=262144,vers=3,tcp",true) }}'
+      state: mounted
+      fstype: nfs
+    loop: "{{mounts | list}}"
+    when: item != 'home'
+
+  - name: create mount "{{mounts[item].mountpoint}}" menu option
+    lineinfile:
+      path: /etc/ood/config/apps/dashboard/initializers/ood.rb
+      search_string: '{{mounts[item].mountpoint}}'
+      line : 'OodFilesApp.candidate_favorite_paths << FavoritePath.new("{{mounts[item].mountpoint}}", title: "{{item}}" )'
+      create: yes
+      state: present
+    loop: "{{mounts | list}}"
+    when: item != 'home'
 
   # Update file upload staging area to be in /mnt/resource
   - name: Create passenger temp dir
@@ -435,6 +422,29 @@
   #         ListenBacklog          511
   #       </IfModule>
 
+  - name: retrieve azhop version
+    delegate_to: localhost
+    connection: local
+    become: false
+    shell: |
+      git describe --always --tags
+    register: azhop_version
+
+  - name: create OOD_VERSION if not exists
+    shell: |
+      cp /opt/ood/VERSION /opt/ood/OOD_VERSION
+    args: 
+      creates: /opt/ood/OOD_VERSION
+
+  - name: retrieve OnDemand version
+    shell: |
+      cat /opt/ood/OOD_VERSION
+    register: ood_version
+
+  - name: Override OOD version with azhop version
+    shell: |
+      echo "{{ood_version.stdout}} | AZHOP {{azhop_version.stdout}}" > /opt/ood/VERSION
+
   - name: restart ood
     shell: systemctl try-restart httpd24-httpd.service httpd24-htcacheclean.service
 
@@ -444,16 +454,19 @@
         yum:
           name: https://ecsft.cern.ch/dist/cvmfs/cvmfs-release/cvmfs-release-latest.noarch.rpm 
           state: present
+          lock_timeout : 180
 
       - name: Install cvmfs package
         yum:
           name: cvmfs 
           state: present
+          lock_timeout : 180
 
       - name: Install EESSI config package
         yum:
           name: https://github.com/EESSI/filesystem-layer/releases/download/latest/cvmfs-config-eessi-latest.noarch.rpm
           state: present
+          lock_timeout : 180
 
       - name: Create cvmfs config 
         copy:
@@ -465,3 +478,8 @@
       - name: Configure cvmfs 
         shell: cvmfs_config setup 
     when:  ( cvmfs_eessi.enabled | default(false) )
+
+  # Generate the node array core lookup file for ondemand - will be only run if the marker file for ondemand exists
+  - import_tasks: nodearray_lookup.yml
+    vars:
+      marker_file: cccluster.ok
